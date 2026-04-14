@@ -53,7 +53,7 @@ jobs:
             -H "Content-Type: application/json" \
             -d "{
               \"model\": \"${MODEL_NAME}\",
-              \"prompt\": \"Share one interesting, concise fact about AI, use explicit words. Output ONLY the raw sentence—no quotes, no line breaks, no extra text.\",
+              \"prompt\": \"Share one interesting, concise fact about AI in Chinese language. Output ONLY the raw sentence—no quotes, no line breaks, no extra text.\",
               \"stream\": false,
               \"options\": { \"temperature\": 0.8 }
             }" | jq -r '.response // empty')
