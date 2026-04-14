@@ -4,7 +4,7 @@ name: 每天
 
 on:
   workflow_dispatch:
-  schedule:
+  # schedule:
     # - cron: "0 21 * * *"  # 每天 UTC 14:00
 
 env:
