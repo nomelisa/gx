@@ -1,11 +1,11 @@
-# Scheduled at 14:00 UTC or manually triggered
+# 于 UTC 14:00 定时运行，或手动触发
 
-name: nk-fact-daily
+name: 每天
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 23 * * *"  # 2 PM UTC daily
+    - cron: "0 23 * * *"  # 每天 UTC 14:00
 
 env:
   MODEL_NAME: hf.co/mradermacher/Qwen3-0.6B-heretic-abliterated-uncensored-i1-GGUF:Q4_K_M
@@ -13,7 +13,7 @@ env:
   API_ENDPOINT: http://localhost:11434
 
 jobs:
-  fetch-anime-fact:
+  fetch-fact:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -23,74 +23,74 @@ jobs:
         with:
           fetch-depth: 1
 
-      - name: 📦 Initialize Ollama
+      - name: 📦 初始化 Ollama
         run: |
           command -v ollama >/dev/null 2>&1 || {
-            echo "→ Installing Ollama runtime..."
+            echo "→ 正在安装 Ollama 运行环境..."
             curl -fsSL https://ollama.com/install.sh | sh
           }
 
-      - name: 🎌 Generate Anime Fact
+      - name: 🧠 生成中文事实
         id: fact-gen
         run: |
-          # Start Ollama service in background
+          # 在后台启动 Ollama 服务
           ollama serve > /tmp/ollama.log 2>&1 &
           
-          # Wait for API availability with timeout
+          # 等待 API 可用，带超时重试
           for attempt in {1..30}; do
             curl -s "${API_ENDPOINT}/api/tags" >/dev/null 2>&1 && break
             sleep 2
           done
           
-          # Verify model is available
+          # 确认模型已可用
           ollama list 2>/dev/null | grep -q "${MODEL_NAME}" || {
-            echo "→ Downloading ${MODEL_NAME}..."
+            echo "→ 正在下载 ${MODEL_NAME}..."
             ollama pull "${MODEL_NAME}"
           }
           
-          # Request anime fact via API
+          # 通过 API 请求生成一句中文事实
           RAW=$(curl -s "${API_ENDPOINT}/api/generate" \
             -H "Content-Type: application/json" \
             -d "{
               \"model\": \"${MODEL_NAME}\",
-              \"prompt\": \"分享一个关于人工智能的有趣且简洁的事实。只输出原始句子——不要加引号，不要换行，也不要添加额外文本。\",
+              \"prompt\": \"分享一个有趣且简洁的事实。只输出原始句子——不要加引号，不要换行，也不要添加额外文本。\",
               \"stream\": false,
               \"options\": { \"temperature\": 0.8 }
             }" | jq -r '.response // empty')
           
-          # Clean and normalize the output
+          # 清理并规范化输出
           FACT=$(printf '%s' "$RAW" | \
             tr -d '\r\t' | \
             sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/^["'\'']+|["'\'']+$//g; s/^[[:space:]]+|[[:space:]]+$//g; s/[[:space:]]{2,}/ /g')
           
-          # Validate result
+          # 校验结果
           if [[ -z "$FACT" || "${#FACT}" -lt 10 ]]; then
-            echo "❌ Failed to generate valid anime fact"
+            echo "❌ 未能生成有效的事实内容"
             exit 1
           fi
           
-          echo "✨ Generated: ${FACT:0:70}..."
+          echo "✨ 已生成：${FACT:0:70}..."
           {
-            echo "anime_fact<<ANIME_DELIM"
+            echo "fact_text<<FACT_DELIM"
             printf '%s\n' "$FACT"
-            echo "ANIME_DELIM"
+            echo "FACT_DELIM"
           } >> "$GITHUB_OUTPUT"
 
-      - name: 🗃️ Commit Fact to Repo
-        if: steps.fact-gen.outputs.anime_fact != ''
+      - name: 🗃️ 提交事实到仓库
+        if: steps.fact-gen.outputs.fact_text != ''
         run: |
-          NEW_FACT="${{ steps.fact-gen.outputs.anime_fact }}"
+          NEW_FACT="${{ steps.fact-gen.outputs.fact_text }}"
           
-          # Set git identity to repository owner
+          # 将 Git 身份设置为仓库所有者
           git config --global user.name "${{ github.repository_owner }}"
           git config --global user.email "${{ github.repository_owner }}@users.noreply.github.com"
           
-          # Append fact to collection file
+          # 将新事实追加到文件
           echo "$NEW_FACT" >> "${{ env.FACT_FILE }}"
           
-          # Stage, commit, and push
+          # 暂存、提交并推送
           git add "${{ env.FACT_FILE }}"
           git commit -m "${NEW_FACT:0:45}"
           git push origin HEAD
           
-          echo "✅ Successfully added fact to ${{ env.FACT_FILE }}"
+          echo "✅ 已成功将事实写入 ${{ env.FACT_FILE }}"
