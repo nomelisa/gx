@@ -25,10 +25,11 @@ jobs:
       - name: 📦 初始化 llama.cpp
         run: |
           echo "→ 正在安装 llama.cpp..."
-          sudo apt-get update && sudo apt-get install -y build-essential curl jq
+          sudo apt-get update && sudo apt-get install -y build-essential cmake curl jq
           git clone https://github.com/ggerganov/llama.cpp.git
           cd llama.cpp
-          make -j$(nproc)
+          cmake -B build
+          cmake --build build --config Release -j$(nproc)
 
       - name: 🧠 生成中文事实
         id: fact-gen
