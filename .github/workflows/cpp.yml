@@ -1,0 +1,103 @@
+# 于 UTC 14:00 定时运行，或手动触发
+
+name: 每天
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 21 * * *"  # 每天 UTC 14:00
+
+env:
+  MODEL_NAME: hf.co/mradermacher/Qwen3-0.6B-heretic-abliterated-uncensored-i1-GGUF:Q4_K_M
+  FACT_FILE: gguf.txt
+
+jobs:
+  fetch-fact:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: 📦 初始化 llama.cpp
+        run: |
+          echo "→ 正在安装 llama.cpp..."
+          sudo apt-get update && sudo apt-get install -y build-essential curl jq
+          git clone https://github.com/ggerganov/llama.cpp.git
+          cd llama.cpp
+          make -j$(nproc)
+
+      - name: 🧠 生成中文事实
+        id: fact-gen
+        run: |
+          # 下载模型
+          echo "→ 正在下载模型 ${MODEL_NAME}..."
+          mkdir -p models
+          cd models
+          # 从 HuggingFace 下载 GGUF 模型
+          MODEL_URL="https://huggingface.co/${MODEL_NAME#hf.co/}/resolve/main/${MODEL_NAME##*:}"
+          curl -L -o model.gguf "$MODEL_URL"
+          cd ..
+
+          # 在后台启动 llama.cpp 服务器
+          ./llama.cpp/build/bin/llama-server \
+            --model models/model.gguf \
+            --host 127.0.0.1 \
+            --port 8080 \
+            > /tmp/llama.log 2>&1 &
+
+          # 等待 API 可用，带超时重试
+          for attempt in {1..30}; do
+            curl -s "http://127.0.0.1:8080/health" >/dev/null 2>&1 && break
+            sleep 2
+          done
+
+          # 通过 API 请求生成一句中文事实
+          RAW=$(curl -s "http://127.0.0.1:8080/completion" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"prompt\": \"分享一个有趣且简洁的事实。只输出原始句子——不要加引号，不要换行，也不要添加额外文本。\",
+              \"n_predict\": 100,
+              \"temperature\": 0.8,
+              \"stream\": false
+            }" | jq -r '.content // empty')
+
+          # 清理并规范化输出
+          FACT=$(printf '%s' "$RAW" | \
+            tr -d '\r\t' | \
+            sed -E 's/\x1b\[[0-9;]*[a-zA-Z]//g; s/^["'\'']+|["'\'']+$//g; s/^[[:space:]]+|[[:space:]]+$//g; s/[[:space:]]{2,}/ /g')
+
+          # 校验结果
+          if [[ -z "$FACT" || "${#FACT}" -lt 10 ]]; then
+            echo "❌ 未能生成有效的事实内容"
+            exit 1
+          fi
+
+          echo "✨ 已生成：${FACT:0:70}..."
+          {
+            echo "fact_text<<FACT_DELIM"
+            printf '%s\n' "$FACT"
+            echo "FACT_DELIM"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: 🗃️ 提交事实到仓库
+        if: steps.fact-gen.outputs.fact_text != ''
+        run: |
+          NEW_FACT="${{ steps.fact-gen.outputs.fact_text }}"
+          
+          # 将 Git 身份设置为仓库所有者
+          git config --global user.name "${{ github.repository_owner }}"
+          git config --global user.email "${{ github.repository_owner }}@users.noreply.github.com"
+          
+          # 将新事实追加到文件
+          echo "$NEW_FACT" >> "${{ env.FACT_FILE }}"
+          
+          # 暂存、提交并推送
+          git add "${{ env.FACT_FILE }}"
+          git commit -m "${NEW_FACT:0:45}"
+          git push origin HEAD
+          
+          echo "✅ 已成功将事实写入 ${{ env.FACT_FILE }}"
